@@ -3,50 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Convertir en BMP < 150 Ko</title>
+<title>Images → JPEG < 150 Ko</title>
 <style>
   :root { color-scheme: dark; }
   body {
     margin: 0; min-height: 100vh; display: grid; place-items: center;
     font-family: system-ui, sans-serif; background: #111827; color: #e5e7eb;
   }
-  main { width: min(680px, 92vw); padding: 24px; }
+  main { width: min(720px, 92vw); padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 16px; }
   #drop {
     border: 2px dashed #4b5563; border-radius: 16px; padding: 40px 20px;
     text-align: center; cursor: pointer; transition: .2s;
   }
   #drop.over { border-color: #22d3ee; background: #0e749022; }
-  #result { margin-top: 18px; display: none; }
-  img { max-width: 100%; border-radius: 12px; display: block; margin-top: 12px; }
+  #results { margin-top: 18px; display: grid; gap: 14px; }
+  .card {
+    background: #1f2937; border-radius: 14px; padding: 14px;
+  }
+  img { max-width: 100%; max-height: 260px; border-radius: 10px; display: block; }
   p { margin: 8px 0; }
   .ok { color: #34d399; } .err { color: #f87171; }
+  small { color: #9ca3af; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Image → BMP de moins de 150 Ko</h1>
+  <h1>Images → JPEG de moins de 150 Ko</h1>
 
   <div id="drop">
     <strong>Dépose une ou plusieurs images ici</strong><br>
     ou clique pour choisir des fichiers<br>
-    <small>Traitement local — aucune image envoyée sur Internet</small>
+    <small>JPG, PNG, WebP… — traitement local, aucune image envoyée sur Internet</small>
     <input id="file" type="file" accept="image/*" multiple hidden>
   </div>
 
-  <div id="result">
-    <p id="info"></p>
-    <img id="preview" alt="Aperçu">
-  </div>
+  <div id="results"></div>
 </main>
 
 <script>
 const MAX = 150 * 1024; // 150 Ko
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
-const result = document.getElementById('result');
-const info = document.getElementById('info');
-const preview = document.getElementById('preview');
+const results = document.getElementById('results');
 
 drop.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => {
@@ -63,6 +62,12 @@ drop.addEventListener('drop', e => {
   [...e.dataTransfer.files].forEach(convert);
 });
 
+function toJpeg(canvas, quality) {
+  return new Promise(resolve =>
+    canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality)
+  );
+}
+
 function resizeToCanvas(bitmap, scale) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
@@ -74,83 +79,61 @@ function resizeToCanvas(bitmap, scale) {
   return canvas;
 }
 
-function canvasToBmpBlob(canvas) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const { width, height } = canvas;
-  const imageData = ctx.getImageData(0, 0, width, height).data;
-
-  const rowSize = Math.floor((width * 3 + 3) / 4) * 4;
-  const pixelArraySize = rowSize * height;
-  const fileSize = 54 + pixelArraySize;
-
-  const buffer = new ArrayBuffer(fileSize);
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-
-  // BITMAPFILEHEADER
-  bytes[0] = 0x42; // B
-  bytes[1] = 0x4D; // M
-  view.setUint32(2, fileSize, true);
-  view.setUint32(10, 54, true);
-
-  // BITMAPINFOHEADER
-  view.setUint32(14, 40, true);
-  view.setInt32(18, width, true);
-  view.setInt32(22, height, true);
-  view.setUint16(26, 1, true);
-  view.setUint16(28, 24, true);
-  view.setUint32(30, 0, true); // sans compression
-  view.setUint32(34, pixelArraySize, true);
-  view.setUint32(38, 2835, true); // 72 dpi
-  view.setUint32(42, 2835, true);
-
-  // Pixels BMP : BGR, lignes enregistrées de bas en haut
-  let offset = 54;
-  for (let y = height - 1; y >= 0; y--) {
-    let p = offset;
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * 4;
-      bytes[p++] = imageData[i + 2]; // Bleu
-      bytes[p++] = imageData[i + 1]; // Vert
-      bytes[p++] = imageData[i];     // Rouge
-    }
-    offset += rowSize;
-  }
-
-  return new Blob([buffer], { type: 'image/bmp' });
-}
-
 async function convert(file) {
-  try {
-    result.style.display = 'block';
-    info.className = '';
-    info.textContent = `Conversion de « ${file.name} »…`;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<p>Conversion de « ${file.name} »…</p>`;
+  results.appendChild(card);
 
+  const status = card.querySelector('p');
+
+  try {
     const bitmap = await createImageBitmap(file);
 
-    // Recherche de la plus grande résolution possible sous 150 Ko
-    let low = 0.02, high = 1, best = null, bestScale = 0;
+    // 1) On cherche la meilleure qualité JPEG à taille d'origine
+    let best = null;
+    let low = 0.05, high = 0.95;
 
-    for (let i = 0; i < 14; i++) {
-      const scale = (low + high) / 2;
-      const canvas = resizeToCanvas(bitmap, scale);
-      const blob = canvasToBmpBlob(canvas);
+    for (let i = 0; i < 12; i++) {
+      const quality = (low + high) / 2;
+      const canvas = resizeToCanvas(bitmap, 1);
+      const blob = await toJpeg(canvas, quality);
 
       if (blob.size <= MAX) {
         best = blob;
-        bestScale = scale;
-        low = scale;
+        low = quality;
       } else {
-        high = scale;
+        high = quality;
+      }
+    }
+
+    // 2) Si ce n'est toujours pas assez léger, on réduit la résolution
+    if (!best) {
+      let lowScale = 0.15, highScale = 1;
+
+      for (let i = 0; i < 14; i++) {
+        const scale = (lowScale + highScale) / 2;
+        const canvas = resizeToCanvas(bitmap, scale);
+        const blob = await toJpeg(canvas, 0.82);
+
+        if (blob.size <= MAX) {
+          best = blob;
+          lowScale = scale;
+        } else {
+          highScale = scale;
+        }
       }
     }
 
     if (!best) throw new Error('Impossible d’atteindre 150 Ko.');
 
     const url = URL.createObjectURL(best);
-    const fileName = file.name.replace(/\.[^.]+$/, '') + '-150ko.bmp';
+    const fileName = file.name.replace(/\.[^.]+$/, '') + '-150ko.jpg';
 
-    preview.src = url;
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = 'Aperçu';
+    card.appendChild(img);
 
     // Téléchargement automatique
     const link = document.createElement('a');
@@ -160,13 +143,11 @@ async function convert(file) {
     link.click();
     link.remove();
 
-    info.className = 'ok';
-    info.textContent = `« ${file.name} » converti : ` +
-      `${(best.size / 1024).toFixed(1)} Ko, ` +
-      `réduction à ${Math.round(bestScale * 100)} % de la taille d’origine.`;
+    status.className = 'ok';
+    status.textContent = `« ${file.name} » : ${(best.size / 1024).toFixed(1)} Ko — téléchargement lancé.`;
   } catch (err) {
-    info.className = 'err';
-    info.textContent = 'Erreur : ' + err.message;
+    status.className = 'err';
+    status.textContent = `Erreur pour « ${file.name} » : ${err.message}`;
   }
 }
 </script>
