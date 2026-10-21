@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Images → JPEG < 150 Ko</title>
+<title>Images → JPEG 400 px < 150 Ko</title>
 <style>
   :root { color-scheme: dark; }
   body {
@@ -21,7 +21,10 @@
   .card {
     background: #1f2937; border-radius: 14px; padding: 14px;
   }
-  img { max-width: 100%; max-height: 260px; border-radius: 10px; display: block; }
+  img {
+    max-width: 100%; max-height: 260px;
+    border-radius: 10px; display: block;
+  }
   p { margin: 8px 0; }
   .ok { color: #34d399; } .err { color: #f87171; }
   small { color: #9ca3af; }
@@ -29,12 +32,12 @@
 </head>
 <body>
 <main>
-  <h1>Images → JPEG de moins de 150 Ko</h1>
+  <h1>Images → JPEG 400 px de large, moins de 150 Ko</h1>
 
   <div id="drop">
     <strong>Dépose une ou plusieurs images ici</strong><br>
     ou clique pour choisir des fichiers<br>
-    <small>JPG, PNG, WebP… — traitement local, aucune image envoyée sur Internet</small>
+    <small>Traitement local — aucune image n’est envoyée sur Internet</small>
     <input id="file" type="file" accept="image/*" multiple hidden>
   </div>
 
@@ -42,7 +45,10 @@
 </main>
 
 <script>
-const MAX = 150 * 1024; // 150 Ko
+const MAX_WIDTH = 400;       // Largeur finale exacte
+const MAX_SIZE = 150 * 1024; // 150 Ko
+const START_QUALITY = 0.90;  // Qualité JPEG de départ
+
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
 const results = document.getElementById('results');
@@ -53,11 +59,19 @@ fileInput.addEventListener('change', e => {
 });
 
 ['dragenter','dragover'].forEach(ev =>
-  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); })
+  drop.addEventListener(ev, e => {
+    e.preventDefault();
+    drop.classList.add('over');
+  })
 );
+
 ['dragleave','drop'].forEach(ev =>
-  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); })
+  drop.addEventListener(ev, e => {
+    e.preventDefault();
+    drop.classList.remove('over');
+  })
 );
+
 drop.addEventListener('drop', e => {
   [...e.dataTransfer.files].forEach(convert);
 });
@@ -68,14 +82,19 @@ function toJpeg(canvas, quality) {
   );
 }
 
-function resizeToCanvas(bitmap, scale) {
+function resizeTo400(bitmap, scale = 1) {
+  const width = MAX_WIDTH * scale;
+  const ratio = bitmap.height / bitmap.width;
+  const height = Math.max(1, Math.round(width * ratio));
+
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = height;
 
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
   return canvas;
 }
 
@@ -90,16 +109,17 @@ async function convert(file) {
   try {
     const bitmap = await createImageBitmap(file);
 
-    // 1) On cherche la meilleure qualité JPEG à taille d'origine
+    // 1) Essai à 400 px de large avec différentes qualités JPEG
     let best = null;
-    let low = 0.05, high = 0.95;
+    let low = 0.05;
+    let high = START_QUALITY;
 
     for (let i = 0; i < 12; i++) {
       const quality = (low + high) / 2;
-      const canvas = resizeToCanvas(bitmap, 1);
+      const canvas = resizeTo400(bitmap, 1);
       const blob = await toJpeg(canvas, quality);
 
-      if (blob.size <= MAX) {
+      if (blob.size <= MAX_SIZE) {
         best = blob;
         low = quality;
       } else {
@@ -107,16 +127,17 @@ async function convert(file) {
       }
     }
 
-    // 2) Si ce n'est toujours pas assez léger, on réduit la résolution
+    // 2) Si toujours trop lourd, on réduit la hauteur en gardant 400 px de large
     if (!best) {
-      let lowScale = 0.15, highScale = 1;
+      let lowScale = 0.20;
+      let highScale = 1;
 
       for (let i = 0; i < 14; i++) {
         const scale = (lowScale + highScale) / 2;
-        const canvas = resizeToCanvas(bitmap, scale);
-        const blob = await toJpeg(canvas, 0.82);
+        const canvas = resizeTo400(bitmap, scale);
+        const blob = await toJpeg(canvas, 0.80);
 
-        if (blob.size <= MAX) {
+        if (blob.size <= MAX_SIZE) {
           best = blob;
           lowScale = scale;
         } else {
@@ -125,14 +146,16 @@ async function convert(file) {
       }
     }
 
-    if (!best) throw new Error('Impossible d’atteindre 150 Ko.');
+    if (!best) {
+      throw new Error('Impossible d’atteindre 150 Ko même en réduisant l’image.');
+    }
 
     const url = URL.createObjectURL(best);
-    const fileName = file.name.replace(/\.[^.]+$/, '') + '-150ko.jpg';
+    const fileName = file.name.replace(/\.[^.]+$/, '') + '-400px-150ko.jpg';
 
     const img = document.createElement('img');
     img.src = url;
-    img.alt = 'Aperçu';
+    img.alt = 'Aperçu converti';
     card.appendChild(img);
 
     // Téléchargement automatique
@@ -144,7 +167,8 @@ async function convert(file) {
     link.remove();
 
     status.className = 'ok';
-    status.textContent = `« ${file.name} » : ${(best.size / 1024).toFixed(1)} Ko — téléchargement lancé.`;
+    status.textContent =
+      `« ${file.name} » : 400 px de large, ${(best.size / 1024).toFixed(1)} Ko — téléchargement lancé.`;
   } catch (err) {
     status.className = 'err';
     status.textContent = `Erreur pour « ${file.name} » : ${err.message}`;
