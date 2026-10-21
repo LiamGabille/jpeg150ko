@@ -127,14 +127,23 @@ async function compress(file) {
 
     if (!best) throw new Error('Impossible d’atteindre 150 Ko.');
 
-    const url = URL.createObjectURL(best);
-    preview.src = url;
-    download.href = url;
-    download.download = file.name.replace(/\.[^.]+$/, '') + '-150ko.jpg';
-
-    info.className = 'ok';
-    info.textContent = `Prêt : ${(best.size / 1024).toFixed(1)} Ko — ` +
-      `qualité JPEG optimisée automatiquement.`;
+  const url = URL.createObjectURL(best);
+  const fileName = file.name.replace(/\.[^.]+$/, '') + '-150ko.jpg';
+  
+  preview.src = url;
+  download.href = url;
+  download.download = fileName;
+  
+  // Téléchargement automatique
+  const autoLink = document.createElement('a');
+  autoLink.href = url;
+  autoLink.download = fileName;
+  document.body.appendChild(autoLink);
+  autoLink.click();
+  autoLink.remove();
+  
+  info.className = 'ok';
+  info.textContent = `Téléchargement lancé : ${(best.size / 1024).toFixed(1)} Ko.`;
   } catch (err) {
     info.className = 'err';
     info.textContent = 'Erreur : ' + err.message;
