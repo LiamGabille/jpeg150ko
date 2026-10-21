@@ -68,26 +68,15 @@ function toJpeg(canvas, quality) {
   );
 }
 
-const MAX_WIDTH = 400; // Largeur maximale en pixels
-
-function resizeToCanvas(bitmap, scale = 1) {
-  // Ratio d'origine conservé
-  const ratio = bitmap.height / bitmap.width;
-
-  // Largeur finale : 400 px maximum, puis réduction si nécessaire
-  let width = Math.min(bitmap.width, MAX_WIDTH) * scale;
-  let height = width * ratio;
-
+function resizeToCanvas(bitmap, scale) {
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(width));
-  canvas.height = Math.max(1, Math.round(height));
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
 
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-
   return canvas;
-};
 }
 
 async function convert(file) {
